@@ -15,74 +15,71 @@ permissions:
 jobs:
   process:
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ secrets.PAT }}
-      
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.PAT }}
 
-      # 1. Create requirements.txt first
-      - name: Create Python requirements
-        run: |
-          cat > requirements.txt << EOL
-          click==8.1.7
-          jsbeautifier==1.14.11
-          esprima==4.0.1
-          rich==13.7.0
-          EOL
-
-      # 2. Setup Python với cache requirements
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
-      - run: pip install -r requirements.txt
 
-      # 3. Setup 1000 dòng logic
-      - name: Setup processor
+      - name: Create requirements
+        run: |
+          echo "click==8.1.7" > requirements.txt
+          echo "jsbeautifier==1.14.11" >> requirements.txt
+          echo "esprima==4.0.1" >> requirements.txt
+          pip install -r requirements.txt
+
+      - name: Create deobfuscator script
         run: |
           mkdir -p deobfuscator/src
-          echo "${{ secrets.DEOBFUSCATOR_CLI }}" > deobfuscator/src/cli.py
-          echo "${{ secrets.DEOBFUSCATOR_INIT }}" > deobfuscator/src/__init__.py
-          chmod +x deobfuscator/src/cli.py
-
-      # 4. Setup GitHub CLI + Copilot  
-      - name: Setup GitHub CLI & Copilot
-        run: |
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-          sudo apt update && sudo apt install gh
-          gh extension install github/gh-copilot
-          gh auth login --with-token <<< "${{ secrets.PAT }}"
-          gh copilot setup
-
-      # 5. Process files
-      - name: Process files 
-        run: |
-          mkdir -p output
-          IFS=',' read -ra FILES <<< "${{ github.event.inputs.files }}"
+          cat > deobfuscator/src/__init__.py << 'EOL'
+          # Init file
+          EOL
           
-          for file in "${FILES[@]}"; do
+          cat > deobfuscator/src/cli.py << 'EOL'
+          import click
+          import jsbeautifier
+          import esprima
+          
+          @click.command()
+          @click.argument('input_file')
+          @click.option('--output', help='Output file')
+          def process(input_file, output):
+              # Đọc file input
+              with open(input_file, 'r') as f:
+                  code = f.read()
+              
+              # Logic xử lý 1000 dòng ở đây
+              processed = jsbeautifier.beautify(code)
+              
+              # Ghi ra file output
+              out_file = output or input_file + '.deob.js'
+              with open(out_file, 'w') as f:
+                  f.write(processed)
+                  
+          if __name__ == '__main__':
+              process()
+          EOL
+
+      - name: Process files
+        run: |
+          IFS=',' read -ra files <<< "${{ github.event.inputs.files }}"
+          for file in "${files[@]}"; do
             file=$(echo "$file" | xargs)
             if [ -f "$file" ]; then
               echo "Processing $file..."
-              python -m deobfuscator.src.cli "$file" --output "output/${file%.js}.deob.js"
-              gh copilot explain "output/${file%.js}.deob.js" > "output/${file%.js}.analysis.md"
+              python -m deobfuscator.src.cli "$file" --output "${file%.js}.deob.js"
             fi
           done
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v5
         with:
-          token: ${{ secrets.PAT }}
-          commit-message: "feat: process javascript files"
-          title: 'Processed JavaScript Files'
-          body: |
-            Files processed with:
-            1. 1000 lines deobfuscation logic
-            2. GitHub Copilot analysis
-          branch: process-js
           delete-branch: true
+          branch: deob-js
+          title: 'Deobfuscate JavaScript'
+          commit-message: 'feat: deobfuscate js'
+          body: |
+            Processed files:
+            ${{ github.event.inputs.files }}
