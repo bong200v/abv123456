@@ -8,12 +8,17 @@ on:
     inputs:
       file_path:
         description: 'Path to JavaScript file to deobfuscate'
-        required: false
-        default: 'filejsclient.js'
+        required: true  # Thay đổi thành required: true
+        type: string
+        default: ''     # Để trống để bắt buộc user phải nhập
       chunk_size:
         description: 'Number of lines to process per chunk'
         required: false
         default: '1000'
+
+permissions:
+  contents: write      # Thêm permissions
+  pull-requests: write
 
 jobs:
   deobfuscate:
@@ -23,6 +28,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: List files
+        run: |
+          pwd
+          ls -la
+          
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -45,10 +55,22 @@ jobs:
         run: |
           echo "${{ secrets.DEOBFUSCATOR_CLI }}" > deobfuscator/src/cli.py
           echo "${{ secrets.DEOBFUSCATOR_INIT }}" > deobfuscator/src/__init__.py
+          ls -la deobfuscator/src/
 
       - name: Process JavaScript file
         run: |
-          file="${{ github.event.inputs.file_path || 'filejsclient.js' }}"
+          file="${{ github.event.inputs.file_path }}"
+          if [ -z "$file" ]; then
+            echo "Error: No JavaScript file specified"
+            exit 1
+          fi
+          
+          if [ ! -f "$file" ]; then
+            echo "Error: File $file does not exist"
+            ls -la
+            exit 1
+          fi
+          
           chunk_size="${{ github.event.inputs.chunk_size || '1000' }}"
           
           python -m deobfuscator.src.cli "$file" \
@@ -57,6 +79,7 @@ jobs:
             --output "${file%.js}.deobfuscated.js"
 
       - name: Upload deobfuscated file
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: deobfuscated-js
@@ -65,6 +88,7 @@ jobs:
             *.analysis.json
 
       - name: Create Pull Request
+        if: success()
         uses: peter-evans/create-pull-request@v5
         with:
           title: 'Deobfuscated JavaScript Files'
@@ -72,7 +96,7 @@ jobs:
             This PR contains deobfuscated JavaScript files processed by the automated workflow.
             
             Files processed:
-            - ${{ github.event.inputs.file_path || 'filejsclient.js' }}
+            - ${{ github.event.inputs.file_path }}
             
             Please review the changes and merge if everything looks correct.
           branch: deobfuscate/js-files
