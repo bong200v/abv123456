@@ -1,0 +1,80 @@
+name: JavaScript Deobfuscator
+
+on:
+  push:
+    paths:
+      - '**.js'
+  workflow_dispatch:
+    inputs:
+      file_path:
+        description: 'Path to JavaScript file to deobfuscate'
+        required: false
+        default: 'filejsclient.js'
+      chunk_size:
+        description: 'Number of lines to process per chunk'
+        required: false
+        default: '1000'
+
+jobs:
+  deobfuscate:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install jsbeautifier esprima rich click
+
+      - name: Create deobfuscator directory
+        run: mkdir -p deobfuscator/src
+        
+      - name: Setup deobfuscator scripts
+        run: |
+          echo "${{ secrets.DEOBFUSCATOR_CLI }}" > deobfuscator/src/cli.py
+          echo "${{ secrets.DEOBFUSCATOR_INIT }}" > deobfuscator/src/__init__.py
+          chmod +x deobfuscator/src/cli.py
+
+      - name: Process JavaScript file
+        run: |
+          file="${{ github.event.inputs.file_path || 'filejsclient.js' }}"
+          chunk_size="${{ github.event.inputs.chunk_size || '1000' }}"
+          
+          python -m deobfuscator.src.cli "$file" \
+            --chunk-size "$chunk_size" \
+            --verbose \
+            --output "${file%.js}.deobfuscated.js"
+
+      - name: Upload deobfuscated file
+        uses: actions/upload-artifact@v4
+        with:
+          name: deobfuscated-js
+          path: |
+            *.deobfuscated.js
+            *.analysis.json
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          title: 'Deobfuscated JavaScript Files'
+          body: |
+            This PR contains deobfuscated JavaScript files processed by the automated workflow.
+            
+            Files processed:
+            - ${{ github.event.inputs.file_path || 'filejsclient.js' }}
+            
+            Please review the changes and merge if everything looks correct.
+          branch: deobfuscate/js-files
+          delete-branch: true
