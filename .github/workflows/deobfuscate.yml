@@ -1,20 +1,12 @@
-name: JavaScript Deobfuscator
+name: Deobfuscate with Copilot
 
 on:
-  push:
-    paths:
-      - '**.js'
   workflow_dispatch:
     inputs:
       file_path:
-        description: 'Path to JavaScript file to deobfuscate'
+        description: 'Path to JavaScript file'
         required: true
-        type: string
         default: 'filejsclient.js'
-      chunk_size:
-        description: 'Number of lines to process per chunk'
-        required: false
-        default: '1000'
 
 permissions:
   contents: write
@@ -25,112 +17,27 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Configure Git
-        run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           token: ${{ secrets.PAT }}
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+          
+      - uses: github/copilot@v1
         with:
-          node-version: '20'
+          token: ${{ secrets.GITHUB_TOKEN }}
           
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          
-      - name: Install dependencies
+      - name: Deobfuscate with Copilot
         run: |
-          python -m pip install --upgrade pip
-          pip install jsbeautifier esprima rich click
+          # Use Copilot to analyze and translate the code
+          copilot analyze ${{ github.event.inputs.file_path }} \
+            --translate \
+            --output ${{ github.event.inputs.file_path }}.deob.js
 
-      - name: Create deobfuscator directory
-        run: |
-          mkdir -p deobfuscator/src
-          chmod 755 deobfuscator/src
-        
-      - name: Setup deobfuscator scripts
-        shell: bash
-        run: |
-          # Create cli.py
-          cat << 'EOL' > deobfuscator/src/cli.py
-          ${{ secrets.DEOBFUSCATOR_CLI }}
-          EOL
-          chmod 644 deobfuscator/src/cli.py
-          
-          # Create __init__.py
-          cat << 'EOL' > deobfuscator/src/__init__.py
-          ${{ secrets.DEOBFUSCATOR_INIT }}
-          EOL
-          chmod 644 deobfuscator/src/__init__.py
-          
-          ls -la deobfuscator/src/
-
-      - name: Process JavaScript file
-        run: |
-          file="${{ github.event.inputs.file_path }}"
-          echo "Processing file: $file"
-          
-          if [ -z "$file" ]; then
-            echo "Error: No JavaScript file specified"
-            exit 1
-          fi
-          
-          if [ ! -f "$file" ]; then
-            echo "Error: File $file does not exist"
-            ls -la
-            exit 1
-          fi
-          
-          chunk_size="${{ github.event.inputs.chunk_size || '1000' }}"
-          output_file="${file%.js}.deobfuscated.js"
-          
-          echo "Input file: $file"
-          echo "Output file: $output_file"
-          echo "Chunk size: $chunk_size"
-          
-          python -m deobfuscator.src.cli "$file" \
-            --chunk-size "$chunk_size" \
-            --verbose \
-            --output "$output_file"
-
-      - name: Upload deobfuscated file
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: deobfuscated-js
-          path: |
-            *.deobfuscated.js
-            *.analysis.json
-          retention-days: 5
-
-      - name: Create Pull Request
-        if: success()
+      - name: Create PR
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.PAT }}
-          commit-message: "chore: add deobfuscated JavaScript files"
-          title: 'Deobfuscated JavaScript Files'
-          body: |
-            This PR contains deobfuscated JavaScript files processed by the automated workflow.
-            
-            Files processed:
-            - ${{ github.event.inputs.file_path }}
-            
-            Run details:
-            - Triggered by: ${{ github.actor }}
-            - Run ID: ${{ github.run_id }}
-          branch: deobfuscate/js-files
+          commit-message: "deobfuscate with copilot"
+          title: 'Deobfuscated with Copilot'
+          body: 'Deobfuscated and translated using GitHub Copilot'
+          branch: deob
           delete-branch: true
-          base: main
-          labels: |
-            automated-pr
-            deobfuscation
