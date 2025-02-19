@@ -1,4 +1,4 @@
-name: JavaScript Processor
+name: JavaScript Analyzer
 
 on:
   workflow_dispatch:
@@ -8,78 +8,83 @@ on:
         required: true
         default: 'filejsclient.js'
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
-  process:
+  analyze:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PAT }}
+      
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PAT }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Create requirements
+          cache: 'pip'
+      
+      - name: Install deps
         run: |
           echo "click==8.1.7" > requirements.txt
           echo "jsbeautifier==1.14.11" >> requirements.txt
-          echo "esprima==4.0.1" >> requirements.txt
           pip install -r requirements.txt
 
-      - name: Create deobfuscator script
+      - name: Setup deobfuscator
         run: |
           mkdir -p deobfuscator/src
           cat > deobfuscator/src/__init__.py << 'EOL'
-          # Init file
+          # Deobfuscator init
           EOL
           
           cat > deobfuscator/src/cli.py << 'EOL'
           import click
           import jsbeautifier
-          import esprima
           
-          @click.command()
-          @click.argument('input_file')
-          @click.option('--output', help='Output file')
-          def process(input_file, output):
-              # Đọc file input
-              with open(input_file, 'r') as f:
-                  code = f.read()
-              
-              # Logic xử lý 1000 dòng ở đây
-              processed = jsbeautifier.beautify(code)
-              
-              # Ghi ra file output
-              out_file = output or input_file + '.deob.js'
-              with open(out_file, 'w') as f:
-                  f.write(processed)
-                  
+          # 1000 dòng logic xử lý từ secret
+          ${{ secrets.DEOBFUSCATOR_LOGIC }}
+          
           if __name__ == '__main__':
               process()
           EOL
 
+      - name: Install GitHub CLI & Copilot
+        run: |
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update && sudo apt install gh
+          gh extension install github/gh-copilot
+
       - name: Process files
         run: |
-          IFS=',' read -ra files <<< "${{ github.event.inputs.files }}"
+          mkdir -p output
+          IFS=',' read -ra files <<< "${{ inputs.files }}"
+          
           for file in "${files[@]}"; do
             file=$(echo "$file" | xargs)
             if [ -f "$file" ]; then
               echo "Processing $file..."
-              python -m deobfuscator.src.cli "$file" --output "${file%.js}.deob.js"
+              
+              # Step 1: Run 1000 dòng logic
+              python -m deobfuscator.src.cli "$file" --output "output/${file%.js}.deob.js"
+              
+              # Step 2: Dùng Copilot phân tích
+              gh copilot explain "output/${file%.js}.deob.js" > "output/${file%.js}.explained.md"
+              gh copilot suggest "output/${file%.js}.deob.js" > "output/${file%.js}.suggested.js"
             fi
           done
 
-      - name: Create Pull Request
+      - name: Create PR
         uses: peter-evans/create-pull-request@v5
         with:
-          delete-branch: true
-          branch: deob-js
-          title: 'Deobfuscate JavaScript'
-          commit-message: 'feat: deobfuscate js'
+          token: ${{ secrets.PAT }}
+          commit-message: "feat: analyze js files"
+          title: 'JavaScript Analysis'
           body: |
-            Processed files:
-            ${{ github.event.inputs.files }}
+            Files processed:
+            - Original deobfuscation
+            - Copilot analysis
+            - Copilot suggestions
+          branch: analyze-js
+          delete-branch: true
