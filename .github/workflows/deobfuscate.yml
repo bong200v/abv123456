@@ -21,11 +21,6 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Configure Git
-        run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -38,59 +33,37 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install jsbeautifier esprima rich click
 
-      # Setup deobfuscator như cũ
-      - name: Create deobfuscator directory 
+      # Install GitHub CLI & Copilot extension
+      - name: Install GitHub CLI
         run: |
-          mkdir -p deobfuscator/src
-          chmod 755 deobfuscator/src
-        
-      - name: Setup deobfuscator scripts
-        shell: bash
-        run: |
-          cat << 'EOL' > deobfuscator/src/cli.py
-          ${{ secrets.DEOBFUSCATOR_CLI }}
-          EOL
-          chmod 644 deobfuscator/src/cli.py
+          type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+          && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+          && sudo apt update \
+          && sudo apt install gh -y
           
-          cat << 'EOL' > deobfuscator/src/__init__.py
-          ${{ secrets.DEOBFUSCATOR_INIT }}
-          EOL
-          chmod 644 deobfuscator/src/__init__.py
-
-      # Giữ lại 1000 dòng logic xử lý trước
-      - name: Process with previous logic
+      - name: Install Copilot CLI
+        run: |
+          gh extension install github/gh-copilot
+          gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
+          
+      - name: Process JavaScript file
         run: |
           file="${{ github.event.inputs.file_path }}"
+          
+          # 1. Deobfuscate với logic cũ (1000 dòng)
           python -m deobfuscator.src.cli "$file" \
             --chunk-size 1000 \
             --verbose \
             --output "${file%.js}.step1.js"
-
-      # Thêm bước dùng Copilot phân tích
-      - name: Setup Copilot
-        uses: github/copilot@v1
-      
-      - name: Analyze with Copilot
-        run: |
-          # Input là file đã qua bước 1
-          input="${{ github.event.inputs.file_path }}.step1.js"
+            
+          # 2. Dùng Copilot phân tích
+          gh copilot explain "${file%.js}.step1.js" > "${file%.js}.analyzed.md"
           
-          # Dùng Copilot phân tích từng phần
-          copilot analyze "$input" \
-            --explain \
-            --translate \
-            --output "${input%.js}.analyzed.md"
-          
-          # Thêm comments giải thích vào code
-          copilot explain "$input" \
-            --verbose \
-            --output "${input%.js}.explained.js"
+          # 3. Thêm comments vào code
+          gh copilot suggest "${file%.js}.step1.js" > "${file%.js}.explained.js"
 
       - name: Upload results
         uses: actions/upload-artifact@v4
@@ -101,20 +74,17 @@ jobs:
             *.analyzed.md
             *.explained.js
 
-      - name: Create PR 
+      - name: Create PR
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.PAT }}
           commit-message: "feat: analyze js with copilot"
           title: 'Analyzed JavaScript'
           body: |
-            Files processed:
-            1. Deobfuscated with previous 1000 lines logic
-            2. Analyzed with Copilot
-            3. Added detailed explanations
+            Files processed with 1000 lines logic and Copilot analysis
             
             Check:
-            - step1.js: Deobfuscated result
+            - step1.js: Deobfuscated result 
             - analyzed.md: Copilot analysis
             - explained.js: Code with comments
           branch: analyze-js
