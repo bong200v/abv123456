@@ -1,4 +1,4 @@
-name: Deobfuscate with Copilot
+name: JavaScript Deobfuscator & Analyzer
 
 on:
   workflow_dispatch:
@@ -7,37 +7,64 @@ on:
         description: 'Path to JavaScript file'
         required: true
         default: 'filejsclient.js'
+      chunk_size:
+        description: 'Lines per chunk'
+        required: false
+        default: '1000'
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  deobfuscate:
+  deobfuscate-and-analyze:
     runs-on: ubuntu-latest
     
     steps:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.PAT }}
-          
-      - uses: github/copilot@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Deobfuscate with Copilot
-        run: |
-          # Use Copilot to analyze and translate the code
-          copilot analyze ${{ github.event.inputs.file_path }} \
-            --translate \
-            --output ${{ github.event.inputs.file_path }}.deob.js
 
-      - name: Create PR
-        uses: peter-evans/create-pull-request@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          pip install jsbeautifier esprima rich click
+          mkdir -p deobfuscator/src
+          chmod 755 deobfuscator/src
+
+      - name: Setup scripts  
+        run: |
+          echo "${{ secrets.DEOBFUSCATOR_CLI }}" > deobfuscator/src/cli.py
+          echo "${{ secrets.DEOBFUSCATOR_INIT }}" > deobfuscator/src/__init__.py
+          chmod 644 deobfuscator/src/*
+
+      - uses: github/copilot@v1
+        
+      - name: Process & Analyze
+        run: |
+          FILE="${{ github.event.inputs.file_path }}"
+          CHUNKS="${{ github.event.inputs.chunk_size }}"
+          
+          # Step 1: Deobfuscate
+          python -m deobfuscator.src.cli "$FILE" \
+            --chunk-size "$CHUNKS" \
+            --verbose \
+            --output "${FILE%.js}.deob.js"
+
+          # Step 2: Copilot analyze
+          copilot analyze "${FILE%.js}.deob.js" \
+            --explain \
+            --translate \
+            --output "${FILE%.js}.analyzed.md"
+
+      - uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.PAT }}
-          commit-message: "deobfuscate with copilot"
-          title: 'Deobfuscated with Copilot'
-          body: 'Deobfuscated and translated using GitHub Copilot'
-          branch: deob
+          commit-message: "feat: deobfuscate and analyze js"
+          title: 'Analyzed JavaScript'
+          branch: analyze-js
           delete-branch: true
+          body: "Deobfuscated and analyzed with Copilot. Check analyzed.md for details."
