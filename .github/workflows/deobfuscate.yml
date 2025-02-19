@@ -1,15 +1,11 @@
 name: JavaScript Deobfuscator
 
 on:
-  push:
-    paths:
-      - '**.js' 
   workflow_dispatch:
     inputs:
       file_path:
-        description: 'Path to JavaScript file to deobfuscate'
+        description: 'Path to JavaScript file'
         required: true
-        type: string
         default: 'filejsclient.js'
 
 permissions:
@@ -19,73 +15,44 @@ permissions:
 jobs:
   deobfuscate:
     runs-on: ubuntu-latest
-    
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           token: ${{ secrets.PAT }}
 
-      - name: Setup Node.js & Python
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # Install GitHub CLI & Copilot extension
-      - name: Install GitHub CLI
+      - name: Install GitHub CLI & Copilot
         run: |
-          type -p curl >/dev/null || (sudo apt update && sudo apt install curl -y)
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-          && sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
-          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-          && sudo apt update \
-          && sudo apt install gh -y
-          
-      - name: Install Copilot CLI
-        run: |
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update
+          sudo apt install gh
           gh extension install github/gh-copilot
-          gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
           
-      - name: Process JavaScript file
+      - name: Process & Analyze
         run: |
           file="${{ github.event.inputs.file_path }}"
           
-          # 1. Deobfuscate với logic cũ (1000 dòng)
-          python -m deobfuscator.src.cli "$file" \
-            --chunk-size 1000 \
-            --verbose \
-            --output "${file%.js}.step1.js"
+          # 1. Deobfuscate (1000 dòng logic cũ)
+          python -m deobfuscator.src.cli "$file" --output "${file%.js}.step1.js"
             
           # 2. Dùng Copilot phân tích
           gh copilot explain "${file%.js}.step1.js" > "${file%.js}.analyzed.md"
-          
-          # 3. Thêm comments vào code
           gh copilot suggest "${file%.js}.step1.js" > "${file%.js}.explained.js"
 
-      - name: Upload results
-        uses: actions/upload-artifact@v4
-        with:
-          name: analyzed-js
-          path: |
-            *.step1.js
-            *.analyzed.md
-            *.explained.js
-
-      - name: Create PR
-        uses: peter-evans/create-pull-request@v5
+      - uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.PAT }}
-          commit-message: "feat: analyze js with copilot"
+          commit-message: "feat: analyze js"
           title: 'Analyzed JavaScript'
-          body: |
-            Files processed with 1000 lines logic and Copilot analysis
-            
-            Check:
-            - step1.js: Deobfuscated result 
-            - analyzed.md: Copilot analysis
-            - explained.js: Code with comments
           branch: analyze-js
           delete-branch: true
