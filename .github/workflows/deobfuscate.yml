@@ -16,7 +16,6 @@ on:
         required: false
         default: '1000'
 
-# Đảm bảo permissions đúng
 permissions:
   contents: write
   pull-requests: write
@@ -26,11 +25,17 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+      - name: Configure Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.PAT }}
           fetch-depth: 0
+          persist-credentials: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -67,14 +72,8 @@ jobs:
           EOL
           chmod 644 deobfuscator/src/__init__.py
           
-          # List files for verification
           ls -la deobfuscator/src/
 
-      - name: List workspace
-        run: |
-          pwd
-          ls -la
-          
       - name: Process JavaScript file
         run: |
           file="${{ github.event.inputs.file_path }}"
@@ -129,9 +128,6 @@ jobs:
             Run details:
             - Triggered by: ${{ github.actor }}
             - Run ID: ${{ github.run_id }}
-            - Timestamp: ${{ github.event.head_commit.timestamp }}
-            
-            Please review the changes and merge if everything looks correct.
           branch: deobfuscate/js-files
           delete-branch: true
           base: main
