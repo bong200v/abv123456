@@ -23,14 +23,25 @@ jobs:
         with:
           token: ${{ secrets.PAT }}
 
-      - name: Setup Python with deps
+      # 1. Create requirements.txt first
+      - name: Create Python requirements
+        run: |
+          cat > requirements.txt << EOL
+          click==8.1.7
+          jsbeautifier==1.14.11
+          esprima==4.0.1
+          rich==13.7.0
+          EOL
+
+      # 2. Setup Python với cache requirements
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-      - run: pip install click jsbeautifier esprima rich
+      - run: pip install -r requirements.txt
 
-      # 1. Setup 1000 dòng logic từ secrets
+      # 3. Setup 1000 dòng logic
       - name: Setup processor
         run: |
           mkdir -p deobfuscator/src
@@ -38,7 +49,7 @@ jobs:
           echo "${{ secrets.DEOBFUSCATOR_INIT }}" > deobfuscator/src/__init__.py
           chmod +x deobfuscator/src/cli.py
 
-      # 2. Cài đặt GitHub CLI + Copilot
+      # 4. Setup GitHub CLI + Copilot  
       - name: Setup GitHub CLI & Copilot
         run: |
           curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
@@ -48,28 +59,21 @@ jobs:
           gh auth login --with-token <<< "${{ secrets.PAT }}"
           gh copilot setup
 
-      # 3. Process files
-      - name: Process files
+      # 5. Process files
+      - name: Process files 
         run: |
           mkdir -p output
-          
-          # Split input files
           IFS=',' read -ra FILES <<< "${{ github.event.inputs.files }}"
           
           for file in "${FILES[@]}"; do
             file=$(echo "$file" | xargs)
             if [ -f "$file" ]; then
               echo "Processing $file..."
-              
-              # Step 1: Run 1000 dòng logic
               python -m deobfuscator.src.cli "$file" --output "output/${file%.js}.deob.js"
-              
-              # Step 2: Analyze với Copilot
               gh copilot explain "output/${file%.js}.deob.js" > "output/${file%.js}.analysis.md"
             fi
           done
 
-      # 4. Upload kết quả
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v5
         with:
@@ -80,9 +84,5 @@ jobs:
             Files processed with:
             1. 1000 lines deobfuscation logic
             2. GitHub Copilot analysis
-            
-            Check output/ directory for results:
-            - *.deob.js: Deobfuscated files
-            - *.analysis.md: Copilot analysis
           branch: process-js
           delete-branch: true
