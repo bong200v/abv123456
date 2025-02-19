@@ -10,12 +10,13 @@ on:
         description: 'Path to JavaScript file to deobfuscate'
         required: true
         type: string
-        default: ''
+        default: 'filejsclient.js'
       chunk_size:
         description: 'Number of lines to process per chunk'
         required: false
         default: '1000'
 
+# Đảm bảo permissions đúng
 permissions:
   contents: write
   pull-requests: write
@@ -27,6 +28,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PAT }}
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -44,24 +48,38 @@ jobs:
           pip install jsbeautifier esprima rich click
 
       - name: Create deobfuscator directory
-        run: mkdir -p deobfuscator/src
+        run: |
+          mkdir -p deobfuscator/src
+          chmod 755 deobfuscator/src
         
       - name: Setup deobfuscator scripts
         shell: bash
         run: |
+          # Create cli.py
           cat << 'EOL' > deobfuscator/src/cli.py
           ${{ secrets.DEOBFUSCATOR_CLI }}
           EOL
+          chmod 644 deobfuscator/src/cli.py
           
+          # Create __init__.py
           cat << 'EOL' > deobfuscator/src/__init__.py
           ${{ secrets.DEOBFUSCATOR_INIT }}
           EOL
+          chmod 644 deobfuscator/src/__init__.py
           
+          # List files for verification
           ls -la deobfuscator/src/
 
+      - name: List workspace
+        run: |
+          pwd
+          ls -la
+          
       - name: Process JavaScript file
         run: |
           file="${{ github.event.inputs.file_path }}"
+          echo "Processing file: $file"
+          
           if [ -z "$file" ]; then
             echo "Error: No JavaScript file specified"
             exit 1
@@ -74,11 +92,16 @@ jobs:
           fi
           
           chunk_size="${{ github.event.inputs.chunk_size || '1000' }}"
+          output_file="${file%.js}.deobfuscated.js"
+          
+          echo "Input file: $file"
+          echo "Output file: $output_file"
+          echo "Chunk size: $chunk_size"
           
           python -m deobfuscator.src.cli "$file" \
             --chunk-size "$chunk_size" \
             --verbose \
-            --output "${file%.js}.deobfuscated.js"
+            --output "$output_file"
 
       - name: Upload deobfuscated file
         if: success()
@@ -88,11 +111,14 @@ jobs:
           path: |
             *.deobfuscated.js
             *.analysis.json
+          retention-days: 5
 
       - name: Create Pull Request
         if: success()
         uses: peter-evans/create-pull-request@v5
         with:
+          token: ${{ secrets.PAT }}
+          commit-message: "chore: add deobfuscated JavaScript files"
           title: 'Deobfuscated JavaScript Files'
           body: |
             This PR contains deobfuscated JavaScript files processed by the automated workflow.
@@ -100,6 +126,15 @@ jobs:
             Files processed:
             - ${{ github.event.inputs.file_path }}
             
+            Run details:
+            - Triggered by: ${{ github.actor }}
+            - Run ID: ${{ github.run_id }}
+            - Timestamp: ${{ github.event.head_commit.timestamp }}
+            
             Please review the changes and merge if everything looks correct.
           branch: deobfuscate/js-files
           delete-branch: true
+          base: main
+          labels: |
+            automated-pr
+            deobfuscation
